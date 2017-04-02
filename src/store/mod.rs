@@ -63,11 +63,22 @@ impl StoreHandle {
 
     /// Saves data for a zone and notifies zone directly via its handle.
     pub fn write(&self, zone: &ZoneHandle, path: &Path, data: &ZoneData) {
+println!("handle.write {:?}", data.path);
         // Optimization: seralize to send over channel instead of cloning ZoneData
         let limit = bincode::Infinite;
         let serialized = bincode::serialize(&data, limit).unwrap();
 
         self.tx.send(StoreCall::Write(zone.clone(), path.clone(), serialized)).unwrap();
+    }
+
+    /// Creates a noop StoreHandle for testing
+    #[cfg(test)]
+    pub fn test_handle() -> StoreHandle {
+        use std::sync::mpsc::channel;
+
+        StoreHandle {
+            tx: channel().0
+        }
     }
 }
 
