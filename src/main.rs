@@ -3,10 +3,14 @@
 #![recursion_limit="128"]
 
 #![feature(associated_consts)]
+#![feature(conservative_impl_trait)]
 #![feature(custom_derive)]
 
 extern crate bincode;
+extern crate bytes;
 extern crate env_logger;
+extern crate futures;
+extern crate futures_cpupool;
 #[macro_use] extern crate log;
 extern crate mioco;
 extern crate rand;
@@ -15,6 +19,8 @@ extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 extern crate threadpool;
 extern crate time;
+extern crate tokio_core;
+extern crate tokio_io;
 
 pub mod client;
 pub mod cluster;
@@ -52,18 +58,24 @@ fn main() {
     println!("  ID / address: {:?}", &id);
 
     let store = store::fs::FS::spawn(&("data_".to_string() + id_str));
-    let manager = manager::Manager::spawn(store);
+    let mut manager = manager::Manager::spawn(id.clone(), store);
 
     let path = path::Path::empty();
     manager.load(&path);
+    println!("  root loaded: {}", manager.zone_loaded(&path));
 
-    let server = server::Server::new(manager.clone(), id.addr());
+    let mut api_addr = id.addr().clone();
+    api_addr.set_port(id.addr().port() + 1);
 
-    println!("root loaded: {}", manager.zone_loaded(&path));
+    println!("Listening addresses:");
+    println!("  Peer: {}", id.addr());
+    println!("  API: {}", &api_addr);
 
+    let server = server::Server::new(manager.clone(), api_addr);
     server.listen();
 
-    println!("listening on: {}", id.addr());
+    //let peer_listener = peer_listener::PeerListener::new(manager.clone(), id.addr().clone());
+    //peer_listener.spawn();
 
     let replicas: Vec<replica::Replica> = match std::env::var("CLUSTER") {
         Ok(r) => r.split(' ').map(|r| r.parse().unwrap()).collect(),

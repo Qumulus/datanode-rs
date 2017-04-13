@@ -12,6 +12,7 @@ use cluster::{ClusterHandle,ClusterPreHandle};
 use listener::RListener;
 use node::External;
 use path::Path;
+use replica::Replica;
 use store::StoreHandle;
 use zone::{Zone, ZoneHandle};
 
@@ -162,8 +163,8 @@ impl ManagerHandle {
 }
 
 impl Manager {
-    pub fn spawn(store: StoreHandle) -> ManagerHandle {
-        let manager = Manager::new(store);
+    pub fn spawn(id: Replica, store: StoreHandle) -> ManagerHandle {
+        let manager = Manager::new(id, store);
         let handle = manager.handle();
 
         thread::spawn(move|| {
@@ -175,7 +176,7 @@ impl Manager {
         handle
     }
 
-    pub fn new(store: StoreHandle) -> Manager {
+    pub fn new(id: Replica, store: StoreHandle) -> Manager {
         let eviction = EvictionManager::spawn();
         let (tx, rx) = channel();
         let cluster = ClusterPreHandle::new();
@@ -191,7 +192,7 @@ impl Manager {
             rx: rx
         };
 
-        cluster.spawn(manager.handle());
+        cluster.spawn(id, manager.handle());
 
         manager
     }
@@ -283,6 +284,7 @@ impl Manager {
 
             if self.requesting_load.len() == 0 {
                 info!("Dropped below MAX_LOADED_HARD zones");
+println!("Dropped below MAX_LOADED_HARD zones");
             }
         }
     }
@@ -296,6 +298,7 @@ impl Manager {
         if self.loaded > MAX_LOADED_HARD {
             if self.requesting_load.len() == 0 {
                 info!("Exceeded MAX_LOADED_HARD zones");
+println!("Exceeded MAX_LOADED_HARD zones");
             }
 
             self.requesting_load.push_back(zone);

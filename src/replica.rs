@@ -6,7 +6,7 @@ use std::str::FromStr;
 /// Represents a Replica.
 ///
 /// Replicas are identified by an IP/port combination
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Replica {
     addr: SocketAddr
 }

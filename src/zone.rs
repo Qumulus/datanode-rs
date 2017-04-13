@@ -18,7 +18,6 @@ use listener::{Listener, RListener};
 use manager::ManagerHandle;
 use node::{DelegatedMatch, Node, Update, Vis, NodeTree};
 use path::Path;
-use replica::Replica;
 
 /// Persistent Zone data
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -41,12 +40,12 @@ enum ZoneCall {
     Load,
     Loaded(ZoneData),
     Merge(NodeTree),
+    MergeNoReplicate(NodeTree),
     MergeWithListeners(NodeTree, Vec<RListener>),
     Save,
     Saved,
     Size(Sender<usize>),
-    State(Sender<ZoneState>),
-    SyncReplicas(Vec<Replica>, Sender<()>)
+    State(Sender<ZoneState>)
 }
 
 struct UserCommand {
@@ -79,7 +78,6 @@ pub struct Zone {
     writes: u64               // Number of writes since last fragment check
     // TODO: size: u64,
     // TODO: prefixes: Option<BTreeMap<String, Node>>
-    // TODO: replicas: Vec<Replicas>
 }
 
 impl ZoneHandle {
@@ -106,6 +104,11 @@ impl ZoneHandle {
     /// be provided.
     pub fn merge(&self, diff: NodeTree) {
         self.tx.send(ZoneCall::Merge(diff)).unwrap();
+    }
+
+    /// Same as `merge` except replicas are not notified
+    pub fn merge_no_replicate(&self, diff: NodeTree) {
+        self.tx.send(ZoneCall::MergeNoReplicate(diff)).unwrap();
     }
 
     /// Same as `merge` except a list of listeners is also provided. The listeners expect to see
@@ -145,14 +148,6 @@ impl ZoneHandle {
         let (tx, rx) = channel();
 
         self.tx.send(ZoneCall::State(tx)).unwrap();
-        rx.recv().unwrap()
-    }
-
-    /// Updates Zone's replicas
-    pub fn sync_replicas(&self, replicas: Vec<Replica>) {
-        let (tx, rx) = channel();
-
-        self.tx.send(ZoneCall::SyncReplicas(replicas, tx)).unwrap();
         rx.recv().unwrap()
     }
 
@@ -309,6 +304,9 @@ impl Zone {
                 self.merge(diff);
                 self.split_check();
             },
+            ZoneCall::MergeNoReplicate(mut diff) => {
+                self.merge_no_replicate(&mut diff);
+            },
             ZoneCall::MergeWithListeners(diff, listeners) => {
                 self.merge_with_listeners(diff, listeners);
                 self.split_check();
@@ -327,10 +325,6 @@ impl Zone {
             },
             ZoneCall::State(reply) => {
                 reply.send(self.state()).unwrap();
-            },
-            ZoneCall::SyncReplicas(replicas, reply) => {
-                self.sync_replicas(replicas);
-                reply.send(()).unwrap();
             }
         }
     }
@@ -378,12 +372,20 @@ impl Zone {
 
         self.merge(diff.noop_vis());
         // TODO: externals goes to external nodes
-        // TODO: diff goes to replicas
+    }
+
+    /// Merge value(s) and replicate
+    pub fn merge(&mut self, mut diff: NodeTree) {
+        self.merge_no_replicate(&mut diff);
+
+        if ! diff.node.is_noop() {
+            self.manager.cluster.replicate(&self.path, diff);
+        }
     }
 
     /// Merge value(s). Merge is generic and most operations are defined as a merge.
-    pub fn merge(&mut self, mut diff: NodeTree) {
-        let (update, externals) = self.data.tree.merge(&mut diff);
+    pub fn merge_no_replicate(&mut self, diff: &mut NodeTree) {
+        let (update, externals) = self.data.tree.merge(diff);
 
         // Only notify if there are changes
         if let Some(update) = update {
@@ -419,10 +421,6 @@ impl Zone {
                     self.manager.send_external(&self.path, external);
                 }
             }
-        }
-
-        if ! diff.node.is_noop() {
-            // TODO: diff goes to replicas
         }
     }
 
@@ -561,11 +559,6 @@ impl Zone {
     /// Get zone state.
     pub fn state(&self) -> ZoneState {
         self.state
-    }
-
-    /// Updates Zone's replicas
-    pub fn sync_replicas(&self, replicas: Vec<Replica>) {
-        println!("[sync_replicas - {:?}] - {:?} - Implement me!", replicas, &self.path);
     }
 
     /// Writes value(s) to the node at `path` at time `ts`
