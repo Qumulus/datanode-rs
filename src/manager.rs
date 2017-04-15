@@ -392,6 +392,11 @@ impl EvictionManager {
             return;
         }
 
+        if loaded == 0 {
+            println!("Nothing to evict");
+            return;
+        }
+
         let overflow = total - MAX_LOADED_SOFT;
         let r = rand::random::<usize>() % (MAX_LOADED_HARD - MAX_LOADED_SOFT) / 2;
 
